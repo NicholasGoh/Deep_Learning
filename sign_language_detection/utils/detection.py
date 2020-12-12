@@ -1,5 +1,4 @@
 from .yolov3 import make_yolov3_model, WeightReader
-from .visualization import visualize, classify
 import numpy as np
 from numpy import expand_dims
 import tensorflow as tf
@@ -7,6 +6,7 @@ from tensorflow.keras.preprocessing.image import load_img
 from tensorflow.keras.preprocessing.image import img_to_array
 from matplotlib.patches import Rectangle
 import math, cv2, os
+from .visualization import save
 import matplotlib.pyplot as plt
 plt.style.use('seaborn-white')
 
@@ -146,7 +146,7 @@ def get_boxes(boxes, labels, thresh):
     return v_boxes, v_labels, v_scores
 
 # draw all results
-def _draw_boxes(img_path, v_boxes, v_labels, v_scores, figsize, save_path):
+def _draw_boxes(img_path, v_boxes, v_labels, v_scores, figsize, save_dir, classifier=None):
     # load the image
     data = plt.imread(img_path)
     # plot the image
@@ -167,44 +167,70 @@ def _draw_boxes(img_path, v_boxes, v_labels, v_scores, figsize, save_path):
         # draw the box
         ax.add_patch(rect)
 
-        # draw text and score in top left corner
-        label = "%s (%.3f)" % (v_labels[i], v_scores[i])
-        plt.text(x1, y1, label, color='white', fontsize=20)
+        if not classifier:
+            # draw text and score in top left corner
+            label = "%s (%.3f)" % (v_labels[i], v_scores[i])
+            plt.text(x1, y1, label, color='white', fontsize=20)
+        else:
+            alphabets = list('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+            dict_map = {i: v for i, v in enumerate(alphabets)}
+
+            hand = cv2.resize(data[y1:y2+1, x1:x2+1], (28, 28))
+            hand = cv2.cvtColor(hand, cv2.COLOR_RGB2GRAY)
+            hand = hand.reshape(1, 28, 28, 1)
+
+            preds = classifier(hand/255.)
+            index = np.argmax(preds[0])
+
+            # draw text and score in top left corner
+            label = "%s (%.3f)" % (dict_map[index], v_scores[i])
+            plt.text(x1-10, y1-10, label, color='white', fontsize=20)
     # show the plot
     plt.show()
-    if save_path:
-        counter = len(os.listdir(save_path)) + 1
-        fig.savefig(os.path.join(save_path, f'{counter}.jpg'))
+    if save_dir:
+        save(save_dir, 'detection', fig=fig)
 
-def load_model(weight_path):
+def load_model(path, weights=False):
     print('loading model...\r', end='')
-    model = make_yolov3_model()
-    weight_reader = WeightReader(weight_path)
-    weight_reader.load_weights(model)
-    weight_reader.load_weights(model)
+    if weights:
+        model = make_yolov3_model()
+        weight_reader = WeightReader(path)
+        weight_reader.load_weights(model)
+        weight_reader.load_weights(model)
+    else:
+        model = tf.keras.models.load_model(path)
     print('model loaded!')
     return model
 
-def draw_boxes(hand_detector, img_path, class_threshold=.6, nms_thresh=.6, figsize=(10, 10), save_path=None):
+def draw_boxes(hand_detector,
+               img_paths,
+               save_dir=None,
+               classifier=None,
+               class_threshold=.6,
+               nms_thresh=.6,
+               figsize=(10, 10)):
     # define the expected input shape for the model
     input_w, input_h = 416, 416
-    # load and prepare image
-    image, image_w, image_h = load_image_pixels(img_path, (input_w, input_h))
-
-    yhat = hand_detector.predict(image)
     # define the anchors
     anchors = [[116,90, 156,198, 373,326], [30,61, 62,45, 59,119], [10,13, 16,30, 33,23]]
-    # define the probability threshold for detected objects
-    boxes = list()
-    for i in range(len(yhat)):
-        # decode the output of the network
-        boxes += decode_netout(yhat[i][0], anchors[i], class_threshold, input_h, input_w)
-    # correct the sizes of the bounding boxes for the shape of the image
-    correct_yolo_boxes(boxes, image_h, image_w, input_h, input_w)
-    # suppress non-maximal boxes
-    do_nms(boxes, nms_thresh)
-    # define the labels
-    labels = ['hand']
-    # get the details of the detected objects
-    v_boxes, v_labels, v_scores = get_boxes(boxes, labels, class_threshold)
-    _draw_boxes(img_path, v_boxes, v_labels, v_scores, figsize, save_path)
+
+    for img_path in img_paths:
+        # load and prepare image
+        image, image_w, image_h = load_image_pixels(img_path, (input_w, input_h))
+
+        yhat = hand_detector.predict(image)
+
+        # define the probability threshold for detected objects
+        boxes = list()
+        for i in range(len(yhat)):
+            # decode the output of the network
+            boxes += decode_netout(yhat[i][0], anchors[i], class_threshold, input_h, input_w)
+        # correct the sizes of the bounding boxes for the shape of the image
+        correct_yolo_boxes(boxes, image_h, image_w, input_h, input_w)
+        # suppress non-maximal boxes
+        do_nms(boxes, nms_thresh)
+        # define the labels
+        labels = ['hand']
+        # get the details of the detected objects
+        v_boxes, v_labels, v_scores = get_boxes(boxes, labels, class_threshold)
+        _draw_boxes(img_path, v_boxes, v_labels, v_scores, figsize, save_dir, classifier=classifier)

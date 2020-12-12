@@ -1,11 +1,10 @@
-import argparse
 import os
 import numpy as np
 from tensorflow.keras.layers import Conv2D, Input, BatchNormalization, LeakyReLU, ZeroPadding2D, UpSampling2D
 from tensorflow.keras.layers import add, concatenate
 from tensorflow.keras.models import Model
 import struct
-import cv2
+import cv2, argparse
 
 # np.set_printoptions(threshold=np.nan)
 np.set_printoptions(threshold=.5)
